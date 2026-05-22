@@ -12,6 +12,7 @@ import argparse
 from datetime import datetime, timezone
 from telethon import TelegramClient
 from telethon.sessions import StringSession
+from cryptography.fernet import Fernet
 
 STATUS_FILE = "checkin_status.json"
 
@@ -42,18 +43,60 @@ SESSION_STRING = os.environ.get("SESSION_STRING", "")
 WAIT_RESPONSE = int(os.environ.get("WAIT_RESPONSE", "10"))
 
 
-def parse_targets():
-    """解析目标配置，支持两种格式：
-    1. 新格式：TARGETS_CONFIG 环境变量（JSON 数组）
-    2. 旧格式：TARGET + MESSAGE 环境变量（单目标，向后兼容）
+ENCRYPTED_FILE = "targets.enc"
+KEY_FILE = "targets.key"
 
-    新格式示例：
-    [
-      {"target": "@bot1", "message": "/checkin", "interval_days": 1},
-      {"target": "-1001234567890", "message": "/sign", "interval_days": 3}
-    ]
-    interval_days 为间隔天数，1表示每天，3表示每3天
+
+def parse_targets():
+    """解析目标配置，支持三种格式：
+    1. AES 加密文件：从 targets.enc 读取并用 targets.key 或环境变量 TARGETS_KEY 解密
+    2. 新格式：TARGETS_CONFIG 环境变量（JSON 数组）
+    3. 旧格式：TARGET + MESSAGE 环境变量（单目标，向后兼容）
     """
+    if os.path.exists(ENCRYPTED_FILE):
+        # 1. 尝试获取解密密钥
+        key = os.environ.get("TARGETS_KEY", "").strip()
+        if not key and os.path.exists(KEY_FILE):
+            try:
+                with open(KEY_FILE, "r", encoding="utf-8") as f:
+                    key = f.read().strip()
+            except Exception as e:
+                print(f"⚠️ 读取本地密钥文件失败: {e}")
+
+        if not key:
+            print("❌ 检测到加密配置文件 targets.enc，但未找到解密密钥！")
+            print("   请设置 TARGETS_KEY 环境变量或提供 targets.key 密钥文件。")
+            sys.exit(1)
+
+        # 2. 读取并解密
+        try:
+            with open(ENCRYPTED_FILE, "r", encoding="utf-8") as f:
+                encrypted_data = f.read().strip()
+
+            fernet = Fernet(key.encode())
+            decrypted_data = fernet.decrypt(encrypted_data.encode()).decode("utf-8")
+            targets = json.loads(decrypted_data)
+
+            if not isinstance(targets, list):
+                print("❌ 解密后的配置必须是 JSON 数组")
+                sys.exit(1)
+
+            parsed = []
+            for i, t in enumerate(targets):
+                if "target" not in t:
+                    print(f"❌ 第 {i+1} 个目标缺少 'target' 字段")
+                    sys.exit(1)
+                parsed.append({
+                    "target": t["target"],
+                    "message": t.get("message", "/checkin"),
+                    "interval_days": t.get("interval_days", 1),
+                    "topic_id": t.get("topic_id", None),
+                })
+            return parsed
+        except Exception as e:
+            print(f"❌ 加密配置文件解密或解析失败: {e}")
+            sys.exit(1)
+
     targets_json = os.environ.get("TARGETS_CONFIG", "")
 
     if targets_json:
@@ -86,6 +129,7 @@ def parse_targets():
         return [{"target": target, "message": message, "interval_days": 1}]
 
     return []
+
 
 
 def filter_by_interval(targets, status, send_all=False):
