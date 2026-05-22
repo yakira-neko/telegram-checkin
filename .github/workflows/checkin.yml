@@ -40,7 +40,7 @@ jobs:
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
           SESSION_STRING: ${{ secrets.SESSION_STRING }}
-          TARGETS_CONFIG: ${{ secrets.TARGETS_CONFIG }}
+          TARGETS_KEY: ${{ secrets.TARGETS_KEY }}
           # 向后兼容旧的单目标配置
           TARGET: ${{ secrets.TARGET }}
           MESSAGE: ${{ secrets.MESSAGE }}
